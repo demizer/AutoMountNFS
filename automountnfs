@@ -1,0 +1,107 @@
+#!/bin/bash
+
+SERVER_FQDN="lithium.alvaone.net"
+TEMP_LOG="/run/automountnfs"
+DATE_OPTS="%a %b %d %H:%M %Y"
+
+trap 'trap_abort' INT QUIT TERM HUP
+trap 'trap_exit' EXIT
+
+cleanup() {
+    loge "Cleanup: $1"
+	[[ $1 ]] && exit $1
+}
+
+abort() {
+	loge 'Aborting...'
+	cleanup 0
+}
+
+trap_abort() {
+	trap - EXIT INT QUIT TERM HUP
+	abort
+}
+
+trap_exit() {
+    loge "Received exit..."
+	trap - EXIT INT QUIT TERM HUP
+	cleanup
+}
+
+log() {
+    echo -e `date +"$DATE_OPTS"`": $1" >> $TEMP_LOG
+}
+
+loge() {
+    echo -e `date +"$DATE_OPTS"`": ERROR: $1" >> $TEMP_LOG
+}
+
+logc() {
+    echo -e `date +"$DATE_OPTS"`": Exec: $1" >> $TEMP_LOG
+}
+
+run_cmd() {
+    # $1: command to run
+    # $2: Redirection
+    cmd=$1
+    logc $cmd
+    $cmd $2
+}
+
+log "auto_share started: $0::$$"
+
+cat /dev/null > $TEMP_LOG
+
+MOUNT_POINTS=$(sed -e '/^.*#/d' -e '/^.*:\//!d' -e 's/\t/ /g' /etc/fstab \
+            | tr -s " " | cut -f2 -d" ")
+
+ping -c 1 "${SERVER_FQDN}" >> $TEMP_LOG
+
+if [ $? -ne 0 ]; then
+    log "The server could not be reached."
+    for umntpnt in ${MOUNT_POINTS}; do
+        log "Unmounting $umntpnt"
+        cmd="umount -l -f $umntpnt"
+        logc "$cmd"
+        $cmd 2>&1 >> $TEMP_LOG
+        if [ $? -ne 0 ]; then
+            loge "umounting failed! ($?)"
+            continue
+        fi
+        log "umounted $umntpnt"
+    done
+else
+    log "Asking the server for mountpoints"
+    cmd="showmount -e $SERVER_FQDN"
+    logc "$cmd"
+    NFS_SHARES=`$cmd 2>>$TEMP_LOG | sed -e '/^\//!d' | cut -f1 -d" "; \
+                test ${PIPESTATUS[0]} -eq 0`
+    smount_ret=$?
+    if [ $smount_ret -ne 0 ]; then
+        loge "No shares available from host! ($smount_ret)"
+        exit;
+    fi
+    log "Server mount points:\n$NFS_SHARES"
+    for mount_point in ${MOUNT_POINTS}; do
+        log "Processing point: $mount_point"
+        if [[ $NFS_SHARES != *$mount_point* ]]; then
+            log "$mount_point not provide by server!"
+            continue
+        fi
+        cmd="mountpoint -q $mount_point"
+        logc "$cmd"
+        $cmd 2>&1 >> $TEMP_LOG
+
+        if [ $? -ne 0 ]; then
+            log "Mounting $mount_point"
+            mount -v $mount_point >> $TEMP_LOG
+            if [ $? -ne 0 ]; then
+                loge "Mounting failed! ($?)"
+                continue
+            fi
+            log "mounted $mount_point"
+        fi
+    done
+fi
+
+# vim: ft=sh

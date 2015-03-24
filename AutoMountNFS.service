@@ -1,0 +1,13 @@
+[Unit]
+Description=Auto Mount NFS Shares
+After=network.target
+Requires=NetworkManager-dispatcher.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/automountnfs
+ExecStop=/usr/bin/automountnfs
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

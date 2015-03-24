@@ -1,0 +1,12 @@
+#!/bin/bash
+
+if [ -e /sys/fs/cgroup/systemd ]; then
+    case "$2" in
+        up)
+            systemctl start AutoMountNFS.service
+        ;;
+        down)
+            systemctl start AutoMountNFS.service
+        ;;
+        esac
+fi
