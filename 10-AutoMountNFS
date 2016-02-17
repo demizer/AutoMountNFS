@@ -6,7 +6,7 @@ if [ -e /sys/fs/cgroup/systemd ]; then
             systemctl start AutoMountNFS.service
         ;;
         down)
-            systemctl start AutoMountNFS.service
+            systemctl stop AutoMountNFS.service
         ;;
         esac
 fi

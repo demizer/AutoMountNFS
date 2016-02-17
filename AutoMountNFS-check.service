@@ -1,0 +1,8 @@
+[Unit]
+Description=Service for AutoMountNFS check timer
+After=network.target
+Requires=NetworkManager-dispatcher.service network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/automountnfs check

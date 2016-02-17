@@ -5,4 +5,4 @@ Description=Checks NFS mounts every minute.
 OnCalendar=minutely
 
 [Install]
-WantedBy=timers.target
+WantedBy=timers.target AutoMountNFS.service

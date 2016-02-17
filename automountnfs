@@ -1,15 +1,16 @@
 #!/bin/bash
 
-SERVER_FQDN="lithium.alvaone.net"
-TEMP_LOG="/run/automountnfs"
-DATE_OPTS="%a %b %d %H:%M %Y"
+AMN_SERVER_FQDN="lithium.alvaone.net"
+AMN_TEMP_LOG="/var/log/automountnfs"
+AMN_DATE_OPTS="%a %b %d %H:%M %Y"
+AMN_CHECK=0
+AMN_UNMOUNT=0
 
 trap 'trap_abort' INT QUIT TERM HUP
 trap 'trap_exit' EXIT
 
 cleanup() {
-    loge "Cleanup: $1"
-	[[ $1 ]] && exit $1
+	exit $1 || true
 }
 
 abort() {
@@ -23,21 +24,21 @@ trap_abort() {
 }
 
 trap_exit() {
-    loge "Received exit..."
+    log "Received exit..."
 	trap - EXIT INT QUIT TERM HUP
 	cleanup
 }
 
 log() {
-    echo -e `date +"$DATE_OPTS"`": $1" >> $TEMP_LOG
+    echo -e `date +"$AMN_DATE_OPTS"`": $1" >> $AMN_TEMP_LOG
 }
 
 loge() {
-    echo -e `date +"$DATE_OPTS"`": ERROR: $1" >> $TEMP_LOG
+    echo -e `date +"$AMN_DATE_OPTS"`": ERROR: $1" >> $AMN_TEMP_LOG
 }
 
 logc() {
-    echo -e `date +"$DATE_OPTS"`": Exec: $1" >> $TEMP_LOG
+    echo -e `date +"$AMN_DATE_OPTS"`": Exec: $1" >> $AMN_TEMP_LOG
 }
 
 run_cmd() {
@@ -48,38 +49,60 @@ run_cmd() {
     $cmd $2
 }
 
+usage() {
+	echo "${0} - Auto Mount or Unmount NFS shares"
+    echo
+    echo "Usage: ${0} [options] (mount|unmount)"
+    echo
+    echo "Options:"
+    echo
+    echo "    -h:    Show help information."
+    echo
+    echo "Commands:"
+    echo
+    echo "    mount     Mount fstab nfs mounts"
+    echo "    unmount   Unmount all fstab nfs mounts"
+}
+
+if [[ $# -lt 1 ]]; then
+    usage;
+    exit 0;
+fi
+
 log "AutoMountNFS started: $0::$$"
+
+ARGS=("$@")
+for (( a = 0; a < $#; a++ )); do
+    if [[ ${ARGS[$a]} == "check" ]]; then
+        log "Found check command argument"
+        AMN_CHECK=1
+    elif [[ ${ARGS[$a]} == "unmount" ]]; then
+        log "Found unmount command argument"
+        AMN_UNMOUNT=1
+    elif [[ ${ARGS[$a]} == "-h" ]]; then
+        usage;
+        exit 0;
+    fi
+done
 
 MOUNT_POINTS=$(sed -e '/^.*#/d' -e '/^.*:\//!d' -e 's/\t/ /g' /etc/fstab \
             | tr -s " " | cut -f2 -d" ")
 
-ping -c 1 "${SERVER_FQDN}" >> $TEMP_LOG
-
-if [ $? -ne 0 ]; then
-    log "The server could not be reached."
+unmount_all() {
     for umntpnt in ${MOUNT_POINTS}; do
         log "Unmounting $umntpnt"
         cmd="umount -l -f $umntpnt"
         logc "$cmd"
-        $cmd 2>&1 >> $TEMP_LOG
+        $cmd 2>&1 >> $AMN_TEMP_LOG
         if [ $? -ne 0 ]; then
             loge "umounting failed! ($?)"
             continue
         fi
         log "umounted $umntpnt"
     done
-else
-    log "Asking the server for mountpoints"
-    cmd="showmount -e $SERVER_FQDN"
-    logc "$cmd"
-    NFS_SHARES=`$cmd 2>>$TEMP_LOG | sed -e '/^\//!d' | cut -f1 -d" "; \
-                test ${PIPESTATUS[0]} -eq 0`
-    smount_ret=$?
-    if [ $smount_ret -ne 0 ]; then
-        loge "No shares available from host! ($smount_ret)"
-        exit;
-    fi
-    log "Server mount points:\n$NFS_SHARES"
+}
+
+mount_all() {
     for mount_point in ${MOUNT_POINTS}; do
         log "Processing point: $mount_point"
         if [[ $NFS_SHARES != *$mount_point* ]]; then
@@ -88,11 +111,10 @@ else
         fi
         cmd="mountpoint -q $mount_point"
         logc "$cmd"
-        $cmd 2>&1 >> $TEMP_LOG
-
+        $cmd 2>&1 >> $AMN_TEMP_LOG
         if [ $? -ne 0 ]; then
             log "Mounting $mount_point"
-            mount -v $mount_point >> $TEMP_LOG
+            mount -v $mount_point >> $AMN_TEMP_LOG
             if [ $? -ne 0 ]; then
                 loge "Mounting failed! ($?)"
                 continue
@@ -100,6 +122,31 @@ else
             log "mounted $mount_point"
         fi
     done
+}
+
+if [[ "${AMN_CHECK}" -eq 1 ]]; then
+    ping -c 1 "${AMN_SERVER_FQDN}" >> $AMN_TEMP_LOG
+    if [ $? -ne 0 ]; then
+        log "The server could not be reached."
+        unmount_all
+    else
+        log "Asking the server for mountpoints"
+        cmd="showmount -e $AMN_SERVER_FQDN"
+        logc "$cmd"
+        NFS_SHARES=`$cmd 2>>$AMN_TEMP_LOG | sed -e '/^\//!d' | cut -f1 -d" "; \
+                    test ${PIPESTATUS[0]} -eq 0`
+        smount_ret=$?
+        if [ $smount_ret -ne 0 ]; then
+            loge "No shares available from host! ($smount_ret)"
+            exit;
+        fi
+        log "Server mount points:\n$NFS_SHARES"
+        mount_all
+    fi
+fi
+
+if [[ "${AMN_UNMOUNT}" -eq 1 ]]; then
+    unmount_all
 fi
 
 # vim: ft=sh
