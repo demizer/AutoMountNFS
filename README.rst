@@ -39,11 +39,48 @@ are unmounted.
 Install
 -------
 
-1. Clone
+Development Prerequisites
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#. makekpg -c
+For development and building using the justfile targets:
 
-#. pacman -U <compiled package>
+* `just <https://github.com/casey/just>`_ - Command runner
+* `aurutils <https://github.com/AladW/aurutils>`_ - Required for ``just build-and-ship`` target
+* `pre-commit <https://pre-commit.com/>`_ - For code quality checks
+
+Building
+~~~~~~~~
+
+1. Clone the repository
+
+2. Using justfile (recommended):
+
+   .. code:: bash
+
+      # Setup development environment
+      just setup
+
+      # Build package locally
+      just build
+
+      # Build and ship to alvaone repository (requires aurutils)
+      just build-and-ship
+
+3. Manual build:
+
+   .. code:: bash
+
+      updpkgsums && makepkg -f
+
+4. Install the package:
+
+   .. code:: bash
+
+      # Using justfile
+      just install
+
+      # Or manually
+      sudo pacman -U automountnfs-*.pkg.tar.xz
 
 #. Make sure NetworkManager-dispatcher is enabled:
 

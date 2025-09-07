@@ -1,0 +1,42 @@
+# Pre-commit configuration for AutoMountNFS repository
+repos:
+  # Basic file cleanup and formatting
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        description: "Remove trailing whitespace"
+      - id: end-of-file-fixer
+        description: "Ensure files end with newline"
+      - id: check-yaml
+        description: "Check YAML syntax"
+      - id: check-json
+        description: "Check JSON syntax"
+      - id: check-toml
+        description: "Check TOML syntax"
+      - id: check-merge-conflict
+        description: "Check for merge conflict markers"
+      - id: check-case-conflict
+        description: "Check for case conflicts"
+      - id: check-symlinks
+        description: "Check for broken symlinks"
+      - id: fix-byte-order-marker
+        description: "Remove UTF-8 byte order marker"
+      - id: mixed-line-ending
+        description: "Replace mixed line endings"
+        args: ['--fix=lf']
+
+  # Additional shell script formatting
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.7.0-4
+    hooks:
+      - id: shfmt
+        description: "Format shell scripts with shfmt"
+        args: ['-i', '4', '-ci', '-sr', '-w']
+
+  # General text file checks
+  - repo: https://github.com/pre-commit/pygrep-hooks
+    rev: v1.10.0
+    hooks:
+      - id: text-unicode-replacement-char
+        description: "Check for unicode replacement characters"
