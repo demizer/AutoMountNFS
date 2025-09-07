@@ -1,6 +1,6 @@
 #!/bin/bash
 
-AMN_SERVER_FQDN="lithium.alvaone.net"
+AMN_SERVER_FQDN="nas.alvaone.net"
 AMN_TEMP_LOG="/var/log/automountnfs"
 AMN_DATE_OPTS="%a %b %d %H:%M %Y"
 AMN_CHECK=0
@@ -10,35 +10,35 @@ trap 'trap_abort' INT QUIT TERM HUP
 trap 'trap_exit' EXIT
 
 cleanup() {
-	exit $1 || true
+    exit $1 || true
 }
 
 abort() {
-	loge 'Aborting...'
-	cleanup 0
+    loge 'Aborting...'
+    cleanup 0
 }
 
 trap_abort() {
-	trap - EXIT INT QUIT TERM HUP
-	abort
+    trap - EXIT INT QUIT TERM HUP
+    abort
 }
 
 trap_exit() {
     log "Received exit..."
-	trap - EXIT INT QUIT TERM HUP
-	cleanup
+    trap - EXIT INT QUIT TERM HUP
+    cleanup
 }
 
 log() {
-    echo -e `date +"$AMN_DATE_OPTS"`": $1" >> $AMN_TEMP_LOG
+    echo -e $(date +"$AMN_DATE_OPTS")": $1" >> $AMN_TEMP_LOG
 }
 
 loge() {
-    echo -e `date +"$AMN_DATE_OPTS"`": ERROR: $1" >> $AMN_TEMP_LOG
+    echo -e $(date +"$AMN_DATE_OPTS")": ERROR: $1" >> $AMN_TEMP_LOG
 }
 
 logc() {
-    echo -e `date +"$AMN_DATE_OPTS"`": Exec: $1" >> $AMN_TEMP_LOG
+    echo -e $(date +"$AMN_DATE_OPTS")": Exec: $1" >> $AMN_TEMP_LOG
 }
 
 run_cmd() {
@@ -50,7 +50,7 @@ run_cmd() {
 }
 
 usage() {
-	echo "${0} - Auto Mount or Unmount NFS shares"
+    echo "${0} - Auto Mount or Unmount NFS shares via systemd units"
     echo
     echo "Usage: ${0} [options] (mount|unmount)"
     echo
@@ -60,19 +60,19 @@ usage() {
     echo
     echo "Commands:"
     echo
-    echo "    mount     Mount fstab nfs mounts"
-    echo "    unmount   Unmount all fstab nfs mounts"
+    echo "    mount     Create and start systemd mount units from commented fstab entries"
+    echo "    unmount   Stop systemd mount units for commented fstab entries"
 }
 
 if [[ $# -lt 1 ]]; then
-    usage;
-    exit 0;
+    usage
+    exit 0
 fi
 
 log "AutoMountNFS started: $0::$$"
 
 ARGS=("$@")
-for (( a = 0; a < $#; a++ )); do
+for ((a = 0; a < $#; a++)); do
     if [[ ${ARGS[$a]} == "check" ]]; then
         log "Found check command argument"
         AMN_CHECK=1
@@ -80,48 +80,111 @@ for (( a = 0; a < $#; a++ )); do
         log "Found unmount command argument"
         AMN_UNMOUNT=1
     elif [[ ${ARGS[$a]} == "-h" ]]; then
-        usage;
-        exit 0;
+        usage
+        exit 0
     fi
 done
 
-MOUNT_POINTS=$(sed -e '/^.*#/d' -e '/^.*:\//!d' -e 's/\t/ /g' /etc/fstab \
-            | tr -s " " | cut -f2 -d" ")
+# Parse commented NFS entries for the configured server
+COMMENTED_NFS_ENTRIES=$(grep "^#.*${AMN_SERVER_FQDN}:.*nfs" /etc/fstab | sed 's/^#[[:space:]]*//')
+
+create_systemd_mount_unit() {
+    # $1: fstab entry line
+    local fstab_entry="$1"
+    local source=$(echo "$fstab_entry" | tr -s " " | cut -f1 -d" ")
+    local target=$(echo "$fstab_entry" | tr -s " " | cut -f2 -d" ")
+    local fstype=$(echo "$fstab_entry" | tr -s " " | cut -f3 -d" ")
+    local options=$(echo "$fstab_entry" | tr -s " " | cut -f4 -d" ")
+
+    # Convert mount path to systemd unit name
+    local unit_name=$(systemd-escape -p --suffix=mount "$target")
+    local unit_path="/etc/systemd/system/${unit_name}"
+
+    log "Creating systemd mount unit: $unit_name"
+
+    cat > "$unit_path" << EOF
+[Unit]
+Description=NFS mount for $target
+After=network-online.target
+Wants=network-online.target
+
+[Mount]
+What=$source
+Where=$target
+Type=$fstype
+Options=$options
+EOF
+
+    systemctl daemon-reload
+    echo "$unit_name"
+}
+
+create_systemd_units() {
+    if [ -z "$COMMENTED_NFS_ENTRIES" ]; then
+        log "No commented NFS entries found for server $AMN_SERVER_FQDN"
+        return
+    fi
+
+    log "Creating systemd units for commented NFS entries"
+    while IFS= read -r entry; do
+        if [ -n "$entry" ]; then
+            create_systemd_mount_unit "$entry"
+        fi
+    done <<< "$COMMENTED_NFS_ENTRIES"
+}
 
 unmount_all() {
-    for umntpnt in ${MOUNT_POINTS}; do
-        log "Unmounting $umntpnt"
-        cmd="umount -l -f $umntpnt"
-        logc "$cmd"
-        $cmd 2>&1 >> $AMN_TEMP_LOG
-        if [ $? -ne 0 ]; then
-            loge "umounting failed! ($?)"
-            continue
-        fi
-        log "umounted $umntpnt"
-    done
+    # Stop systemd mount units for commented entries
+    if [ -n "$COMMENTED_NFS_ENTRIES" ]; then
+        log "Stopping systemd mount units for commented NFS entries"
+        while IFS= read -r entry; do
+            if [ -n "$entry" ]; then
+                local target=$(echo "$entry" | tr -s " " | cut -f2 -d" ")
+                local unit_name=$(systemd-escape -p --suffix=mount "$target")
+                log "Stopping systemd mount unit: $unit_name"
+                systemctl stop "$unit_name" 2>&1 >> $AMN_TEMP_LOG
+            fi
+        done <<< "$COMMENTED_NFS_ENTRIES"
+    else
+        log "No commented NFS entries found for server $AMN_SERVER_FQDN"
+    fi
 }
 
 mount_all() {
-    for mount_point in ${MOUNT_POINTS}; do
-        log "Processing point: $mount_point"
-        if [[ $NFS_SHARES != *$mount_point* ]]; then
-            log "$mount_point not provide by server!"
-            continue
-        fi
-        cmd="mountpoint -q $mount_point"
-        logc "$cmd"
-        $cmd 2>&1 >> $AMN_TEMP_LOG
-        if [ $? -ne 0 ]; then
-            log "Mounting $mount_point"
-            mount -v $mount_point >> $AMN_TEMP_LOG
-            if [ $? -ne 0 ]; then
-                loge "Mounting failed! ($?)"
-                continue
+    # Create and start systemd mount units for commented entries
+    if [ -n "$COMMENTED_NFS_ENTRIES" ]; then
+        create_systemd_units
+        log "Starting systemd mount units for commented NFS entries"
+        while IFS= read -r entry; do
+            if [ -n "$entry" ]; then
+                local source=$(echo "$entry" | tr -s " " | cut -f1 -d" ")
+                local target=$(echo "$entry" | tr -s " " | cut -f2 -d" ")
+                local unit_name=$(systemd-escape -p --suffix=mount "$target")
+
+                # Check if the NFS share is available from server
+                if [[ $NFS_SHARES != *$(echo $source | cut -d: -f2)* ]]; then
+                    log "$target not provided by server!"
+                    continue
+                fi
+
+                # Check if already mounted
+                cmd="mountpoint -q $target"
+                logc "$cmd"
+                $cmd 2>&1 >> $AMN_TEMP_LOG
+                if [ $? -ne 0 ]; then
+                    log "Starting systemd mount unit: $unit_name"
+                    systemctl start "$unit_name" 2>&1 >> $AMN_TEMP_LOG
+                    if [ $? -ne 0 ]; then
+                        loge "Starting systemd mount unit failed! ($?)"
+                        continue
+                    fi
+                    log "started systemd mount unit $unit_name"
+                fi
             fi
-            log "mounted $mount_point"
-        fi
-    done
+        done <<< "$COMMENTED_NFS_ENTRIES"
+    else
+        log "No commented NFS entries found for server $AMN_SERVER_FQDN"
+    fi
 }
 
 if [[ "${AMN_CHECK}" -eq 1 ]]; then
@@ -133,12 +196,14 @@ if [[ "${AMN_CHECK}" -eq 1 ]]; then
         log "Asking the server for mountpoints"
         cmd="showmount -e $AMN_SERVER_FQDN"
         logc "$cmd"
-        NFS_SHARES=`$cmd 2>>$AMN_TEMP_LOG | sed -e '/^\//!d' | cut -f1 -d" "; \
-                    test ${PIPESTATUS[0]} -eq 0`
+        NFS_SHARES=$(
+            $cmd 2>> $AMN_TEMP_LOG | sed -e '/^\//!d' | cut -f1 -d" "
+            test ${PIPESTATUS[0]} -eq 0
+        )
         smount_ret=$?
         if [ $smount_ret -ne 0 ]; then
             loge "No shares available from host! ($smount_ret)"
-            exit;
+            exit
         fi
         log "Server mount points:\n$NFS_SHARES"
         mount_all

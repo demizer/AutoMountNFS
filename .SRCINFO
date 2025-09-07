@@ -1,0 +1,20 @@
+pkgbase = automountnfs
+	pkgdesc = Simple NFS mount handling for wireless hosts.
+	pkgver = 0.7.0
+	pkgrel = 1
+	url = https://github.com/demizer/automountnfs
+	arch = any
+	license = MIT
+	depends = networkmanager
+	source = 10-AutoMountNFS
+	source = automountnfs
+	source = AutoMountNFS.service
+	source = AutoMountNFS-check.service
+	source = AutoMountNFS-check.timer
+	md5sums = d24dcc16e952e079cce8fbc0194d0531
+	md5sums = 4e45e5eab512262f41ad66e5f55b5845
+	md5sums = e7c165e85de84a9be7a982932ffc4132
+	md5sums = a8b53727cb514228d1738dd3d25ecfbe
+	md5sums = 385306da45c700ea82e5390274088cf0
+
+pkgname = automountnfs
