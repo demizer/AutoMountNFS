@@ -18,11 +18,11 @@ How
 ---
 
 With NetworkManager-dispatcher enabled, systemd will activate any scripts contained in /etc/NetworkManager/dispatcher.d. This
-is where 10-AutoMountNFS is installed. This script calls the AutoMountNFS systemd service which itself calls the
+is where 10-automountnfs is installed. This script calls the automountnfs systemd service which itself calls the
 ``automountnfs`` script that does the actual mounting. The ``automountnfs`` script checks for my nfs server, if it is found,
 then it attempts to mount the nfs shares. If it is not found, then it attempts to umount any mounted shares. Simple.
 
-Additionally, AutoMountNFS uses systemd timers to run every minute. If the NFS host cannot be reached, then the NFS mounts
+Additionally, automountnfs uses systemd timers to run every minute. If the NFS host cannot be reached, then the NFS mounts
 are unmounted.
 
 .. Unfortunately, systemd has set a 3 second timeout for NetworkManager-dispatcher
@@ -88,11 +88,11 @@ Building
 
       systemctl enable NetworkManager-dispatcher
 
-#. Enable and start AutoMountNFS
+#. Enable and start automountnfs
 
    .. code:: bash
 
-      systemctl enable AutoMountNFS.timer
-      systemctl start AutoMountNFS.timer
+      systemctl enable automountnfs-check.timer
+      systemctl start automountnfs-check.timer
 
 #. Check ``/var/run/automountnfs`` for output.

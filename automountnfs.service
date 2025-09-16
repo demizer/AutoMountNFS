@@ -11,4 +11,4 @@ ExecStop=/usr/bin/automountnfs unmount
 
 [Install]
 WantedBy=multi-user.target
-Also=AutoMountNFS-check.timer
+Also=automountnfs-check.timer

@@ -3,10 +3,10 @@
 if [ -e /sys/fs/cgroup/systemd ]; then
     case "$2" in
         up)
-            systemctl start AutoMountNFS.service
+            systemctl start automountnfs.service
         ;;
         down)
-            systemctl stop AutoMountNFS.service
+            systemctl stop automountnfs.service
         ;;
         esac
 fi

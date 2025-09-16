@@ -1,28 +1,28 @@
 # Maintainer: Jesus Alvarez <jesusalv@rez.codes>
 pkgname=automountnfs
-pkgver=0.7.0
+pkgver=0.7.4
 pkgrel=1
 pkgdesc="Simple NFS mount handling for wireless hosts."
 arch=('any')
 license=('MIT')
 url="https://github.com/demizer/automountnfs"
 depends=('networkmanager')
-source=('10-AutoMountNFS'
+source=('10-automountnfs'
         'automountnfs'
-        'AutoMountNFS.service'
-        'AutoMountNFS-check.service'
-        'AutoMountNFS-check.timer')
-md5sums=('d24dcc16e952e079cce8fbc0194d0531'
-         '4e45e5eab512262f41ad66e5f55b5845'
-         'e7c165e85de84a9be7a982932ffc4132'
+        'automountnfs.service'
+        'automountnfs-check.service'
+        'automountnfs-check.timer')
+md5sums=('5c03f13514b1e7fe2718723dbd7bdba8'
+         '7dc12e6a3dd4ac223be948823bb6bc57'
+         '03d18023f266849b5c8aeb2c02eb0e81'
          'a8b53727cb514228d1738dd3d25ecfbe'
-         '385306da45c700ea82e5390274088cf0')
+         '719b1271639e0e9a501a459692d9ad73')
 
 package() {
     cd "${srcdir}"
     install -Dm755 automountnfs "${pkgdir}/usr/bin/automountnfs"
-    install -Dm644 AutoMountNFS.service "${pkgdir}/usr/lib/systemd/system/AutoMountNFS.service"
-    install -Dm644 AutoMountNFS-check.service "${pkgdir}/usr/lib/systemd/system/AutoMountNFS-check.service"
-    install -Dm644 AutoMountNFS-check.timer "${pkgdir}/usr/lib/systemd/system/AutoMountNFS-check.timer"
-    install -Dm700 10-AutoMountNFS "${pkgdir}/etc/NetworkManager/dispatcher.d/10-AutoMountNFS"
+    install -Dm644 automountnfs.service "${pkgdir}/usr/lib/systemd/system/automountnfs.service"
+    install -Dm644 automountnfs-check.service "${pkgdir}/usr/lib/systemd/system/automountnfs-check.service"
+    install -Dm644 automountnfs-check.timer "${pkgdir}/usr/lib/systemd/system/automountnfs-check.timer"
+    install -Dm700 10-automountnfs "${pkgdir}/etc/NetworkManager/dispatcher.d/10-automountnfs"
 }
