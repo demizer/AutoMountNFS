@@ -1,6 +1,6 @@
 pkgbase = automountnfs
 	pkgdesc = Simple NFS mount handling for wireless hosts.
-	pkgver = 0.7.4
+	pkgver = 0.7.10
 	pkgrel = 1
 	url = https://github.com/demizer/automountnfs
 	arch = any
@@ -12,7 +12,7 @@ pkgbase = automountnfs
 	source = automountnfs-check.service
 	source = automountnfs-check.timer
 	md5sums = 5c03f13514b1e7fe2718723dbd7bdba8
-	md5sums = 7dc12e6a3dd4ac223be948823bb6bc57
+	md5sums = 0fc84c6411f032a93464ab32df28d7db
 	md5sums = 03d18023f266849b5c8aeb2c02eb0e81
 	md5sums = a8b53727cb514228d1738dd3d25ecfbe
 	md5sums = 719b1271639e0e9a501a459692d9ad73

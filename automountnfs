@@ -4,6 +4,8 @@ AMN_SERVER_FQDN="nas.alvaone.net"
 AMN_DATE_OPTS="%a %b %d %H:%M %Y"
 AMN_CHECK=0
 AMN_UNMOUNT=0
+AMN_STATUS=0
+AMN_MOUNT_POINT=""
 
 trap 'trap_abort' INT QUIT TERM HUP
 trap 'trap_exit' EXIT
@@ -48,19 +50,55 @@ run_cmd() {
     $cmd $2
 }
 
+# Helper function to get mount point name from path
+get_mount_point_name() {
+    local path="$1"
+    basename "$path"
+}
+
+# Helper function to filter NFS entries by mount point name
+filter_nfs_entries() {
+    local mount_point_name="$1"
+    local filtered_entries=()
+
+    for entry in "${NFS_ENTRIES[@]}"; do
+        if [ -n "$entry" ]; then
+            local target=$(echo "$entry" | awk '{print $2}')
+            local target_name=$(get_mount_point_name "$target")
+            if [[ "$target_name" == "$mount_point_name" ]]; then
+                filtered_entries+=("$entry")
+            fi
+        fi
+    done
+
+    printf '%s\n' "${filtered_entries[@]}"
+}
+
 usage() {
     echo "${0} - Auto Mount or Unmount NFS shares via systemd units"
     echo
-    echo "Usage: ${0} [options] (mount|unmount)"
+    echo "Usage: ${0} [options] (mount|unmount|check|status) [mount_point]"
     echo
     echo "Options:"
     echo
-    echo "    -h:    Show help information."
+    echo "    -h, --help:   Show help information."
     echo
     echo "Commands:"
     echo
-    echo "    mount     Create and start systemd mount units from commented fstab entries"
-    echo "    unmount   Stop systemd mount units for commented fstab entries"
+    echo "    mount   [mount_point]     Create and start systemd mount units for NFS shares"
+    echo "                              If mount_point specified, only mount that specific share"
+    echo
+    echo "    unmount [mount_point]     Stop mount services and unmount shares"
+    echo "                              If mount_point specified, only unmount that specific share"
+    echo
+    echo "    check                     Check server availability and mount shares if available"
+    echo "                              (Used by timer for automatic monitoring)"
+    echo
+    echo "    status                    List configured mount units and their status"
+    echo
+    echo "Mount points:"
+    echo "    arch_repo, arch_pkg_cache, projects, coding, videography, backups,"
+    echo "    documents, files, games, movies, music, pictures, shows, stage, torrents, videos"
 }
 
 if [[ $# -lt 1 ]]; then
@@ -68,24 +106,80 @@ if [[ $# -lt 1 ]]; then
     exit 0
 fi
 
-log "AutoMountNFS started: $0::$$"
-
+# Check for help flags first, before logging starts
 ARGS=("$@")
 for ((a = 0; a < $#; a++)); do
-    if [[ ${ARGS[$a]} == "check" ]]; then
-        log "Found check command argument"
-        AMN_CHECK=1
-    elif [[ ${ARGS[$a]} == "unmount" ]]; then
-        log "Found unmount command argument"
-        AMN_UNMOUNT=1
-    elif [[ ${ARGS[$a]} == "-h" ]]; then
+    if [[ ${ARGS[$a]} == "-h" || ${ARGS[$a]} == "--help" ]]; then
+        trap - EXIT INT QUIT TERM HUP
         usage
         exit 0
     fi
 done
 
-# Parse commented NFS entries for the configured server
-COMMENTED_NFS_ENTRIES=$(grep "^#.*${AMN_SERVER_FQDN}:.*nfs" /etc/fstab | sed 's/^#[[:space:]]*//')
+log "AutoMountNFS started: $0::$$"
+
+# Track if we found a valid command
+VALID_COMMAND=0
+
+for ((a = 0; a < $#; a++)); do
+    if [[ ${ARGS[$a]} == "check" ]]; then
+        log "Found check command argument"
+        AMN_CHECK=1
+        VALID_COMMAND=1
+    elif [[ ${ARGS[$a]} == "unmount" ]]; then
+        log "Found unmount command argument"
+        AMN_UNMOUNT=1
+        VALID_COMMAND=1
+        # Check if next argument is a mount point
+        if [[ $((a + 1)) -lt $# ]] && [[ ! ${ARGS[$((a + 1))]} =~ ^- ]]; then
+            AMN_MOUNT_POINT="${ARGS[$((a + 1))]}"
+            log "Found mount point argument: $AMN_MOUNT_POINT"
+        fi
+    elif [[ ${ARGS[$a]} == "mount" ]]; then
+        log "Found mount command argument"
+        VALID_COMMAND=1
+        # Check if next argument is a mount point
+        if [[ $((a + 1)) -lt $# ]] && [[ ! ${ARGS[$((a + 1))]} =~ ^- ]]; then
+            AMN_MOUNT_POINT="${ARGS[$((a + 1))]}"
+            log "Found mount point argument: $AMN_MOUNT_POINT"
+        fi
+    elif [[ ${ARGS[$a]} == "status" ]]; then
+        log "Found status command argument"
+        AMN_STATUS=1
+        VALID_COMMAND=1
+    elif [[ ${ARGS[$a]} =~ ^-- ]]; then
+        loge "Invalid option: ${ARGS[$a]}"
+        loge "Use -h or --help for usage information"
+        exit 1
+    fi
+done
+
+# Check if no valid command was found
+if [[ $VALID_COMMAND -eq 0 ]]; then
+    loge "No valid command specified"
+    usage
+    exit 1
+fi
+
+# Hardcoded NFS entries array
+NFS_ENTRIES=(
+    "nas.alvaone.net:/mnt/bigdata/arch_repo/alvaone_repo   /mnt/arch_repo          nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/arch_repo/pac_cache      /mnt/arch_pkg_cache     nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/projects                 /mnt/projects           nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/projects/coding          /mnt/coding             nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/projects/videography     /mnt/videography        nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/backups                  /mnt/backups            nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/documents                /mnt/documents          nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/files                    /mnt/files              nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/games                    /mnt/games              nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/movies                   /mnt/movies             nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/music                    /mnt/music              nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/pictures                 /mnt/pictures           nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/shows                    /mnt/shows              nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/stage                    /mnt/stage              nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/torrents                 /mnt/torrents           nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+    "nas.alvaone.net:/mnt/bigdata/videos                   /mnt/videos             nfs4    _netdev,noauto,noatime,nodiratime,rsize=131072,wsize=131072,timeo=10"
+)
 
 create_systemd_mount_unit() {
     # $1: fstab entry line
@@ -120,28 +214,100 @@ Options=$options
 EOF
 
     systemctl daemon-reload
-    echo "$unit_name"
+}
+
+list_mounts() {
+    log "Listing configured NFS mount units and their status"
+    echo
+    printf "%-20s %-30s %-10s %-15s\n" "MOUNT POINT" "UNIT NAME" "LOADED" "ACTIVE"
+    printf "%-20s %-30s %-10s %-15s\n" "-----------" "---------" "------" "------"
+
+    for entry in "${NFS_ENTRIES[@]}"; do
+        if [ -n "$entry" ]; then
+            local target=$(echo "$entry" | awk '{print $2}')
+            local target_name=$(get_mount_point_name "$target")
+
+            # Skip if target is empty or invalid
+            if [[ -z "$target" || "$target" =~ ^[[:space:]]*$ ]]; then
+                continue
+            fi
+
+            local unit_name=$(systemd-escape -p --suffix=mount "$target")
+
+            # Get unit status
+            local loaded=$(systemctl is-enabled "$unit_name" 2>/dev/null || echo "disabled")
+            local active_output
+            active_output=$(systemctl is-active "$unit_name" 2>/dev/null) || active_output="inactive"
+            local active="$active_output"
+
+            printf "%-20s %-30s %-10s %-15s\n" "$target_name" "$unit_name" "$loaded" "$active"
+        fi
+    done
+    echo
 }
 
 create_systemd_units() {
-    if [ -z "$COMMENTED_NFS_ENTRIES" ]; then
-        log "No commented NFS entries found for server $AMN_SERVER_FQDN"
+    local entries_to_create=("${NFS_ENTRIES[@]}")
+
+    # Filter entries if specific mount point is specified
+    if [ -n "$AMN_MOUNT_POINT" ]; then
+        mapfile -t entries_to_create < <(filter_nfs_entries "$AMN_MOUNT_POINT")
+    fi
+
+    if [ ${#entries_to_create[@]} -eq 0 ]; then
+        log "No NFS entries found"
         return
     fi
 
-    log "Creating systemd units for commented NFS entries"
-    while IFS= read -r entry; do
+    log "Creating systemd units for NFS entries"
+    for entry in "${entries_to_create[@]}"; do
         if [ -n "$entry" ]; then
             create_systemd_mount_unit "$entry"
         fi
-    done <<< "$COMMENTED_NFS_ENTRIES"
+    done
 }
 
 unmount_all() {
-    # Stop systemd mount units for commented entries
-    if [ -n "$COMMENTED_NFS_ENTRIES" ]; then
-        log "Stopping systemd mount units for commented NFS entries"
-        while IFS= read -r entry; do
+    # Stop systemd mount units for NFS entries
+    if [ ${#NFS_ENTRIES[@]} -eq 0 ]; then
+        log "No NFS entries found"
+        return
+    fi
+
+    log "Stopping systemd mount units for NFS entries"
+    for entry in "${NFS_ENTRIES[@]}"; do
+        if [ -n "$entry" ]; then
+            local target=$(echo "$entry" | awk '{print $2}')
+            # Skip if target is empty or invalid
+            if [[ -z "$target" || "$target" =~ ^[[:space:]]*$ ]]; then
+                continue
+            fi
+            local unit_name=$(systemd-escape -p --suffix=mount "$target")
+            log "Stopping systemd mount unit: $unit_name"
+            systemctl stop "$unit_name"
+        fi
+    done
+}
+
+disable_all() {
+    local entries_to_unmount=("${NFS_ENTRIES[@]}")
+
+    # Filter entries if specific mount point is specified
+    if [ -n "$AMN_MOUNT_POINT" ]; then
+        log "Disabling mount services for specific mount point: $AMN_MOUNT_POINT"
+        mapfile -t entries_to_unmount < <(filter_nfs_entries "$AMN_MOUNT_POINT")
+        if [ ${#entries_to_unmount[@]} -eq 0 ]; then
+            loge "No NFS entries found for mount point: $AMN_MOUNT_POINT"
+            return 1
+        fi
+    else
+        log "Disabling all mount services and unmounting shares"
+    fi
+
+    # Stop units from NFS entries
+    if [ ${#entries_to_unmount[@]} -gt 0 ]; then
+        log "Stopping systemd mount units for NFS entries"
+        for entry in "${entries_to_unmount[@]}"; do
             if [ -n "$entry" ]; then
                 local target=$(echo "$entry" | awk '{print $2}')
                 # Skip if target is empty or invalid
@@ -149,66 +315,116 @@ unmount_all() {
                     continue
                 fi
                 local unit_name=$(systemd-escape -p --suffix=mount "$target")
-                log "Stopping systemd mount unit: $unit_name"
-                systemctl stop "$unit_name"
+                log "Stopping and disabling systemd mount unit: $unit_name"
+
+                # Stop the mount unit
+                systemctl stop "$unit_name" 2>/dev/null || true
+
+                # Disable the mount unit
+                systemctl disable "$unit_name" 2>/dev/null || true
+
+                # Force unmount if still mounted
+                if mountpoint -q "$target" 2>/dev/null; then
+                    log "Force unmounting: $target"
+                    umount -f "$target" 2>/dev/null || umount -l "$target" 2>/dev/null || true
+                fi
             fi
-        done <<< "$COMMENTED_NFS_ENTRIES"
-    else
-        log "No commented NFS entries found for server $AMN_SERVER_FQDN"
+        done
     fi
+
+    # Force unmount any remaining NFS mounts from the configured server
+    REMAINING_MOUNTS=$(mount | grep "type nfs" | grep "$AMN_SERVER_FQDN" | awk '{print $3}')
+    if [ -n "$REMAINING_MOUNTS" ]; then
+        log "Force unmounting remaining NFS shares:"
+        echo "$REMAINING_MOUNTS" | while read -r mountpoint; do
+            log "Unmounting: $mountpoint"
+            umount -f "$mountpoint" 2>/dev/null || umount -l "$mountpoint" 2>/dev/null || true
+        done
+    fi
+
+    # Stop the automountnfs service itself
+    log "Stopping automountnfs service"
+    systemctl stop automountnfs 2>/dev/null || true
+
+    # Stop and disable the check timer
+    log "Stopping automountnfs-check timer"
+    systemctl stop automountnfs-check.timer 2>/dev/null || true
+    systemctl disable automountnfs-check.timer 2>/dev/null || true
+
+    systemctl daemon-reload
+    log "All mount services stopped, shares unmounted, automountnfs service stopped, and check timer disabled"
 }
 
 mount_all() {
-    # Create and start systemd mount units for commented entries
-    if [ -n "$COMMENTED_NFS_ENTRIES" ]; then
-        create_systemd_units
-        log "Starting systemd mount units for commented NFS entries"
-        while IFS= read -r entry; do
-            if [ -n "$entry" ]; then
-                local source=$(echo "$entry" | awk '{print $1}')
-                local target=$(echo "$entry" | awk '{print $2}')
+    # Create and start systemd mount units for NFS entries
+    local entries_to_mount=("${NFS_ENTRIES[@]}")
 
-                # Skip if target is empty or invalid
-                if [[ -z "$target" || "$target" =~ ^[[:space:]]*$ ]]; then
-                    continue
-                fi
+    # Filter entries if specific mount point is specified
+    if [ -n "$AMN_MOUNT_POINT" ]; then
+        log "Filtering for mount point: $AMN_MOUNT_POINT"
+        mapfile -t entries_to_mount < <(filter_nfs_entries "$AMN_MOUNT_POINT")
+        if [ ${#entries_to_mount[@]} -eq 0 ]; then
+            loge "No NFS entries found for mount point: $AMN_MOUNT_POINT"
+            return 1
+        fi
+    fi
 
-                local unit_name=$(systemd-escape -p --suffix=mount "$target")
+    if [ ${#entries_to_mount[@]} -eq 0 ]; then
+        log "No NFS entries found"
+        return
+    fi
 
-                # Check if the NFS share is available from server
-                if [[ $NFS_SHARES != *$(echo $source | cut -d: -f2)* ]]; then
-                    log "$target not provided by server!"
-                    continue
-                fi
+    create_systemd_units
+    log "Starting systemd mount units for NFS entries"
+    for entry in "${entries_to_mount[@]}"; do
+        if [ -n "$entry" ]; then
+            local source=$(echo "$entry" | awk '{print $1}')
+            local target=$(echo "$entry" | awk '{print $2}')
 
-                # Ensure mount point exists with correct ownership and permissions
+            # Skip if target is empty or invalid
+            if [[ -z "$target" || "$target" =~ ^[[:space:]]*$ ]]; then
+                continue
+            fi
+
+            local unit_name=$(systemd-escape -p --suffix=mount "$target")
+
+            # Check if the NFS share is available from server
+            if [[ $NFS_SHARES != *$(echo $source | cut -d: -f2)* ]]; then
+                log "$target not provided by server!"
+                continue
+            fi
+
+            # Check if already mounted
+            cmd="mountpoint -q $target"
+            logc "$cmd"
+            $cmd
+            if [ $? -ne 0 ]; then
+                # Ensure mount point exists
                 if [ ! -d "$target" ]; then
                     log "Creating mount point: $target"
                     mkdir -p "$target"
                 fi
 
-                # Set ownership to bigdata group and permissions (g+ws)
+                # Set ownership to bigdata group and permissions (g+ws) before mounting
                 log "Setting ownership and permissions for $target"
-                chgrp bigdata "$target"
-                chmod g+ws "$target"
-
-                # Check if already mounted
-                cmd="mountpoint -q $target"
-                logc "$cmd"
-                $cmd
+                chgrp bigdata "$target" 2>/dev/null || log "Warning: Could not change group ownership"
+                chmod g+ws "$target" 2>/dev/null || log "Warning: Could not change permissions"
+                log "Starting systemd mount unit: $unit_name"
+                systemctl start "$unit_name"
                 if [ $? -ne 0 ]; then
-                    log "Starting systemd mount unit: $unit_name"
-                    systemctl start "$unit_name"
-                    if [ $? -ne 0 ]; then
-                        loge "Starting systemd mount unit failed! ($?)"
-                        continue
-                    fi
-                    log "started systemd mount unit $unit_name"
+                    loge "Starting systemd mount unit failed! ($?)"
+                    continue
                 fi
+                log "started systemd mount unit $unit_name"
             fi
-        done <<< "$COMMENTED_NFS_ENTRIES"
-    else
-        log "No commented NFS entries found for server $AMN_SERVER_FQDN"
+        fi
+    done
+
+    # Enable and start the check timer only when mounting all shares
+    if [ -z "$AMN_MOUNT_POINT" ]; then
+        log "Starting automountnfs-check timer"
+        systemctl enable automountnfs-check.timer 2>/dev/null || true
+        systemctl start automountnfs-check.timer 2>/dev/null || true
     fi
 }
 
@@ -236,7 +452,25 @@ if [[ "${AMN_CHECK}" -eq 1 ]]; then
 fi
 
 if [[ "${AMN_UNMOUNT}" -eq 1 ]]; then
-    unmount_all
+    disable_all
+elif [[ "${AMN_STATUS}" -eq 1 ]]; then
+    list_mounts
+elif [[ "${AMN_CHECK}" -eq 0 && "${AMN_UNMOUNT}" -eq 0 && "${AMN_STATUS}" -eq 0 ]]; then
+    # Default behavior when just "mount" command is used
+    log "Asking the server for mountpoints"
+    cmd="showmount -e $AMN_SERVER_FQDN"
+    logc "$cmd"
+    NFS_SHARES=$(
+        $cmd 2>&1 | sed -e '/^\//!d' | cut -f1 -d" "
+        test ${PIPESTATUS[0]} -eq 0
+    )
+    smount_ret=$?
+    if [ $smount_ret -ne 0 ]; then
+        loge "No shares available from host! ($smount_ret)"
+        exit 1
+    fi
+    log "Server mount points:\n$NFS_SHARES"
+    mount_all
 fi
 
 # vim: ft=sh
